@@ -6,6 +6,7 @@ set -e
 
 CONFIG_DIR="$HOME/.claude"
 CLAUDE_SETTINGS="$CONFIG_DIR/settings.json"
+ANTHROPIC_BASE_URL="https://anthropic.qnaigc.com"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -57,7 +58,7 @@ fetch_models() {
     local response
     if response=$(curl -s --fail -H "x-api-key: $api_key" \
         -H "anthropic-version: 2023-06-01" \
-        "https://api.anthropic.com/v1/models" 2>&1); then
+        "$ANTHROPIC_BASE_URL/v1/models" 2>&1); then
         if [ -n "$response" ]; then
             echo "$response" | jq -r '.data[] | "\(.id) - \(.display_name // .id)"' 2>/dev/null || echo "$response"
         else
