@@ -17,7 +17,6 @@ This skill helps manage Claude model selection and configuration by interacting 
 - `check` / `status` - Check API key availability and show current settings
 - `models` / `list` - List available models from Anthropic API
 - `set <model>` - Set the active model in Claude Code settings
-- `current` / `now` - Show the currently configured model
 - `help` - Show usage information
 
 ## Environment Variables
@@ -37,8 +36,6 @@ model-select models
 # Set a specific model as active
 model-select set claude-opus-4-0
 
-# Show current model
-model-select current
 ```
 
 ## Examples
