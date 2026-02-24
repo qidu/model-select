@@ -6,7 +6,10 @@ set -e
 
 CONFIG_DIR="$HOME/.claude"
 CLAUDE_SETTINGS="$CONFIG_DIR/settings.json"
-ANTHROPIC_BASE_URL="https://anthropic.qnaigc.com"
+ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-${BASE_URL:-https://api.anthropic.com}}"
+
+# Get API key from environment
+api_key="${ANTHROPIC_AUTH_TOKEN:-${ANTHROPIC_API_KEY:-}}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -16,57 +19,38 @@ NC='\033[0m'
 
 echo -e "${BLUE}=== Claude Model Select ===${NC}\n"
 
-check_jq() {
-    if ! command -v jq &> /dev/null; then
-        echo -e "${RED}Error: jq is required.${NC}"
-        if command -v brew &> /dev/null; then
-            echo -e "Install with: ${GREEN}brew install jq${NC}"
-        elif command -v apt-get &> /dev/null; then
-            echo -e "Install with: ${GREEN}sudo apt install jq${NC}"
-        elif command -v choco &> /dev/null; then
-            echo -e "Install with: ${GREEN}choco install jq${NC}"
-        elif command -v winget &> /dev/null; then
-            echo -e "Install with: ${GREEN}winget install jqlang.jq${NC}"
-        else
-            echo -e "Please install jq manually: https://stedolan.github.io/jq/download.html"
-        fi
-        exit 1
-    fi
-}
-
-get_api_key() {
-    echo "${ANTHROPIC_API_KEY:-${ANTHROPIC_AUTH_TOKEN:-}}"
-}
-
-check_api_key() {
-    local api_key=$(get_api_key)
-    if [ -z "$api_key" ]; then
-        echo -e "${YELLOW}No API key found. Set: export ANTHROPIC_API_KEY='your-key'${NC}"
-        return 1
-    fi
-    echo -e "${GREEN}API key found.${NC}"
-    return 0
-}
-
 fetch_models() {
-    local api_key=$(get_api_key)
-    if [ -z "$api_key" ]; then
-        echo -e "${YELLOW}Cannot fetch models without API key.${NC}"
-        return 1
-    fi
-    echo -e "${BLUE}Fetching models from Anthropic API...${NC}"
+    echo -e "${BLUE}Fetching models from: $ANTHROPIC_BASE_URL${NC}"
     local response
-    if response=$(curl -s --fail -H "x-api-key: $api_key" \
-        -H "anthropic-version: 2023-06-01" \
-        "$ANTHROPIC_BASE_URL/v1/models" 2>&1); then
+    local http_code
+    if [ -n "$api_key" ]; then
+        http_code=$(curl -s -o /dev/null -w "%{http_code}" -H "x-api-key: $api_key" \
+            -H "anthropic-version: 2023-06-01" \
+            "$ANTHROPIC_BASE_URL/v1/models" 2>&1) || http_code="000"
+    else
+        echo -e "${YELLOW}No API key found, attempting unauthenticated request...${NC}"
+        http_code=$(curl -s -o /dev/null -w "%{http_code}" "$ANTHROPIC_BASE_URL/v1/models" 2>&1) || http_code="000"
+    fi
+
+    if [ "$http_code" = "200" ]; then
+        if [ -n "$api_key" ]; then
+            response=$(curl -s -H "x-api-key: $api_key" \
+                -H "anthropic-version: 2023-06-01" \
+                "$ANTHROPIC_BASE_URL/v1/models")
+        else
+            response=$(curl -s "$ANTHROPIC_BASE_URL/v1/models")
+        fi
         if [ -n "$response" ]; then
             echo "$response" | jq -r '.data[] | "\(.id) - \(.display_name // .id)"' 2>/dev/null || echo "$response"
         else
             echo -e "${YELLOW}No models returned from API.${NC}"
             show_known_models
         fi
+    elif [ "$http_code" = "000" ]; then
+        echo -e "${RED}Connection failed.${NC}"
+        show_known_models
     else
-        echo -e "${YELLOW}API request failed. Using known models list.${NC}"
+        echo -e "${YELLOW}HTTP $http_code - Using known models list.${NC}"
         show_known_models
     fi
 }
@@ -97,24 +81,94 @@ set_model() {
     else
         echo "{\"model\": \"$model\"}" > "$CLAUDE_SETTINGS"
     fi
+    local tmpfile=$(mktemp /tmp/claude-model-env.XXXXXX.sh)
+    {
+        echo "# Claude model environment configuration"
+        echo "export ANTHROPIC_MODEL=\"$model\""
+        echo "export ANTHROPIC_BASE_URL=\"$ANTHROPIC_BASE_URL\""
+        if [ -n "$api_key" ]; then
+            echo "export ANTHROPIC_AUTH_TOKEN=\"$api_key\""
+        fi
+        echo "unset ANTHROPIC_API_KEY"
+    } > "$tmpfile"
     echo -e "${GREEN}Model set to: $model${NC}"
+    echo -e "${GREEN}Environment file created: $tmpfile${NC}"
+    echo ""
+    echo -e "${YELLOW}To activate, run:${NC}"
+    echo ""
+    echo -e "  ${GREEN}Linux/macOS/WSL:${NC}  source $tmpfile"
+    echo -e "  ${GREEN}Windows (PowerShell):${NC}  Get-Content $tmpfile | Invoke-Expression"
+    echo ""
+    echo -e "${YELLOW}Or add to your shell profile (~/.bashrc, ~/.zshrc, etc.):${NC}"
+    echo -e "  source $tmpfile"
 }
-
-check_jq
 
 case "${1:-}" in
     "check"|"status")
-        check_api_key
-        show_current_settings
+        echo -e "${BLUE}=== Claude Model Configuration ===${NC}\n"
+
+        # Show API key status (first 8 + last 8 chars)
+        if [ -n "$ANTHROPIC_AUTH_TOKEN" ]; then
+            key_len=${#ANTHROPIC_AUTH_TOKEN}
+            if [ "$key_len" -le 16 ]; then
+                key_display="$ANTHROPIC_AUTH_TOKEN"
+            else
+                key_display="${ANTHROPIC_AUTH_TOKEN:0:8}...${ANTHROPIC_AUTH_TOKEN: -8}"
+            fi
+            echo -e "${GREEN}API Key${NC}: $key_display"
+            echo -e "  ${YELLOW}Source: ANTHROPIC_AUTH_TOKEN environment variable${NC}"
+        elif [ -n "$ANTHROPIC_API_KEY" ]; then
+            key_len=${#ANTHROPIC_API_KEY}
+            if [ "$key_len" -le 16 ]; then
+                key_display="$ANTHROPIC_API_KEY"
+            else
+                key_display="${ANTHROPIC_API_KEY:0:8}...${ANTHROPIC_API_KEY: -8}"
+            fi
+            echo -e "${GREEN}API Key${NC}: $key_display"
+            echo -e "  ${YELLOW}Source: ANTHROPIC_API_KEY environment variable${NC}"
+        else
+            echo -e "${YELLOW}API Key${NC}: Not set"
+        fi
+
+        # Show current model and source
+        echo -e "\n${BLUE}Current Model:${NC}"
+        if [ -n "$ANTHROPIC_MODEL" ]; then
+            echo -e "  ${GREEN}$ANTHROPIC_MODEL${NC}"
+            echo -e "  ${YELLOW}Source: ANTHROPIC_MODEL environment variable${NC}"
+        elif [ -f "$CLAUDE_SETTINGS" ]; then
+            local settings_model
+            settings_model=$(jq -r '.model // empty' "$CLAUDE_SETTINGS" 2>/dev/null)
+            if [ -n "$settings_model" ]; then
+                echo -e "  ${GREEN}$settings_model${NC}"
+                echo -e "  ${YELLOW}Source: $CLAUDE_SETTINGS${NC}"
+            else
+                echo -e "  ${YELLOW}claude-sonnet-4-0${NC} (default)"
+                echo -e "  ${YELLOW}Source: default (no model in settings)${NC}"
+            fi
+        else
+            echo -e "  ${YELLOW}claude-sonnet-4-0${NC} (default)"
+            echo -e "  ${YELLOW}Source: default (no settings file)${NC}"
+        fi
+
+        # Show base URL and source
+        echo -e "\n${BLUE}Base URL:${NC}"
+        if [ -n "$ANTHROPIC_BASE_URL" ] && [ "$ANTHROPIC_BASE_URL" != "https://api.anthropic.com" ]; then
+            echo -e "  ${GREEN}$ANTHROPIC_BASE_URL${NC}"
+            echo -e "  ${YELLOW}Source: ANTHROPIC_BASE_URL env var${NC}"
+        elif [ -n "$BASE_URL" ]; then
+            echo -e "  ${GREEN}$BASE_URL${NC}"
+            echo -e "  ${YELLOW}Source: BASE_URL env var${NC}"
+        else
+            echo -e "  ${GREEN}https://api.anthropic.com${NC}"
+            echo -e "  ${YELLOW}Source: default${NC}"
+        fi
+        echo ""
         ;;
     "models"|"list")
         fetch_models
         ;;
     "set")
         [ -z "${2:-}" ] && { echo "Usage: model-select set <model>"; fetch_models; } || set_model "$2"
-        ;;
-    "current"|"now")
-        [ -f "$CLAUDE_SETTINGS" ] && jq -r '.model' "$CLAUDE_SETTINGS" || echo "claude-sonnet-4-0 (default)"
         ;;
     "help"|"--help"|"-h")
         cat <<EOF
@@ -126,13 +180,12 @@ Commands:
   check, status    - Check API key and show settings
   models, list     - List available models
   set <model>      - Set active model
-  current, now     - Show current model
   help             - Show this help
 EOF
         ;;
     "")
-        show_current_settings
-        echo "Use 'model-select help' for usage"
+        # Show status by default
+        echo -e "${BLUE}=== Claude Model Configuration ===${NC}\n"
         ;;
     *)
         echo "Unknown: $1. Use 'model-select help'"
