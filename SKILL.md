@@ -1,6 +1,6 @@
 ---
 name: model-select
-description: Select and configure Claude models by checking API keys, fetching available models from Anthropic API, and managing model settings. Use when working with Claude models, switching between different model versions, or configuring API access.
+description: Select and configure Claude models for Claude Code by checking API keys, fetching available models from Anthropic API, and managing model settings. Use when working with Claude models, switching between different model versions, or configuring API access.
 license: MIT
 metadata:
   author: qidu
@@ -10,7 +10,10 @@ compatibility: Requires jq and internet access to call Anthropic API. Refer to s
 
 # Claude Model Select Skill
 
-This skill helps manage Claude model selection and configuration by interacting with the Anthropic API and Claude Code settings.
+This skill helps manage Claude model selection and configuration for Claude Code by interacting with the Anthropic API and Claude Code settings.
+
+## Scripts Path
+- `<claude-code-skills-path>/model-select/scripts/model-select`
 
 ## Commands
 
@@ -54,14 +57,14 @@ model: claude-sonnet-4-0
 ### Setting a New Model
 
 ```bash
-$ model-select set claude-haiku-3-5-2025-02-20
+$ model-select set claude-haiku-3-5
 === Claude Model Select ===
 
-Model set to: claude-haiku-3-5-2025-02-20
+Model set to: claude-haiku-3-5
 ```
 
 ## Requirements
 
 - `jq` - JSON processing tool
 - `curl` - For API requests
-- Network access to `https://api.anthropic.com`
+- Network access to API `<base-url>`
